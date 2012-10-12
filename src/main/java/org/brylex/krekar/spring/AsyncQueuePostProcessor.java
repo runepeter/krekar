@@ -1,27 +1,27 @@
 package org.brylex.krekar.spring;
 
 import org.brylex.krekar.Broker;
-import org.brylex.krekar.EntityListener;
+import org.brylex.krekar.AsyncQueue;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.stereotype.Component;
 
 @Component
-public class EntityListenerPostProcessor implements BeanPostProcessor {
+public class AsyncQueuePostProcessor implements BeanPostProcessor {
 
     private final Broker broker;
 
     @Autowired
-    public EntityListenerPostProcessor(final Broker broker) {
+    public AsyncQueuePostProcessor(final Broker broker) {
         this.broker = broker;
     }
 
     @Override
     public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
 
-        if (EntityListener.class.isAssignableFrom(bean.getClass())) {
-            return broker.registerQueue((EntityListener) bean);
+        if (AsyncQueue.class.isAssignableFrom(bean.getClass())) {
+            return broker.registerQueue((AsyncQueue) bean);
         }
 
         return bean;

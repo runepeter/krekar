@@ -3,7 +3,7 @@ package org.brylex.krekar.spring;
 import java.lang.reflect.Field;
 
 import org.brylex.krekar.Broker;
-import org.brylex.krekar.EntityListener;
+import org.brylex.krekar.AsyncQueue;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.config.InstantiationAwareBeanPostProcessorAdapter;
@@ -23,12 +23,12 @@ public class EntityListenerFieldReplacerBeanPostProcessorAdapter extends Instant
     public boolean postProcessAfterInstantiation(Object bean, String beanName) throws BeansException {
 
         for (Field f : bean.getClass().getDeclaredFields()) {
-            if (EntityListener.class.isAssignableFrom(f.getType())) {
-                EntityListener entityListener = broker.getEntityListener((Class<EntityListener>) f.getType());
+            if (AsyncQueue.class.isAssignableFrom(f.getType())) {
+                AsyncQueue asyncQueue = broker.getEntityListener((Class<AsyncQueue>) f.getType());
 
                 try {
                     f.setAccessible(true);
-                    f.set(bean, entityListener);
+                    f.set(bean, asyncQueue);
                     return true;
                 } catch (IllegalAccessException e) {
                     throw new RuntimeException("Unable to replace field [" + f + "]'s value with asynchronous proxy.");

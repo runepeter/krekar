@@ -1,77 +1,55 @@
 package org.brylex.krekar;
 
-import java.lang.reflect.Method;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
-
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.typesafe.config.ConfigFactory;
-
-import org.springframework.stereotype.Component;
-
-import akka.actor.ActorRef;
-import akka.actor.ActorSystem;
-import akka.actor.Props;
-import akka.actor.TypedActor;
-import akka.actor.TypedProps;
+import akka.actor.*;
 import akka.japi.Creator;
 import akka.routing.RoundRobinRouter;
-import akka.util.Duration;
+import com.google.common.collect.Maps;
+import com.typesafe.config.ConfigFactory;
 import net.sf.cglib.proxy.Enhancer;
 import net.sf.cglib.proxy.MethodInterceptor;
 import net.sf.cglib.proxy.MethodProxy;
 
-@Component
+import java.lang.reflect.Method;
+import java.util.Map;
+
 public class Broker {
 
-    private final Map<Class<? extends EntityListener>, EntityListener> map = Maps.newHashMap();
+    private final Map<Class<? extends AsyncQueue>, AsyncQueue> map = Maps.newHashMap();
     private final ActorSystem system;
 
     public Broker() {
-
         this.system = ActorSystem.create("KrekarSystem", ConfigFactory.load());
-
-        /*system.scheduler().schedule(Duration.create(2L, TimeUnit.SECONDS), Duration.create(2L, TimeUnit.SECONDS), new Runnable() {
-            @Override
-            public void run() {
-
-                System.err.println("RUNE-" + System.currentTimeMillis());
-
-            }
-        });*/
     }
 
-    public <T extends EntityListener> T getEntityListener(Class<T> listenerClass) {
+    public <T extends AsyncQueue> T getEntityListener(Class<T> listenerClass) {
         return (T) map.get(listenerClass);
     }
 
-    public <T extends EntityListener> T registerQueue(final T entityListener) {
+    public <T extends AsyncQueue> T registerQueue(final T entityListener) {
 
         int numWorkersForQueue = 10;
 
-        final List<ActorRef> actorRefs = Lists.newArrayListWithCapacity(numWorkersForQueue);
+        final ActorRef ref = system.actorOf(
+                new Props()
+                        .withRouter(new RoundRobinRouter(numWorkersForQueue))
+                        .withDispatcher("krekar-dispatcher")
+                        .withCreator(new Creator<Actor>() {
+                            @Override
+                            public Actor create() throws Exception {
+                                return new EntityListenerActor(entityListener);
+                            }
+                        })
+        );
 
-        for (int i = 0; i < numWorkersForQueue; i++) {
-            EntityListener listener = TypedActor.get(system).typedActorOf(new TypedProps<EntityListener>(EntityListener.class, new Creator<EntityListener>() {
-                @Override
-                public EntityListener create() throws Exception {
-                    return entityListener;
-                }
-            }).withDispatcher("krekar-dispatcher"));
-            actorRefs.add(TypedActor.get(system).getActorRefFor(listener));
-        }
+        final Class<? extends AsyncQueue> aClass = entityListener.getClass();
+        System.out.println(aClass);
 
-        ActorRef actorRef = system.actorOf(new Props().withDispatcher("krekar-dispatcher").withRouter(RoundRobinRouter.create(actorRefs)));
-        final EntityListener delegate = TypedActor.get(system).typedActorOf(new TypedProps<EntityListener>(EntityListener.class), actorRef);
-
-        EntityListener proxy = (EntityListener) Enhancer.create(entityListener.getClass(), new MethodInterceptor() {
+        AsyncQueue proxy = (AsyncQueue) Enhancer.create(aClass, new MethodInterceptor() {
             @Override
             public Object intercept(final Object o, final Method method, final Object[] objects, final MethodProxy methodProxy) throws Throwable {
 
                 if ("onEntity".equals(method.getName())) {
-                    delegate.onEntity(objects[0]);
+                    ref.tell(objects[0]);
                 } else {
                     return method.invoke(entityListener, objects);
                 }
@@ -80,8 +58,30 @@ public class Broker {
             }
         });
 
-        map.put(entityListener.getClass(), proxy);
+        map.put(aClass, proxy);
 
         return (T) proxy;
     }
+
+    private static class EntityListenerActor extends UntypedActor {
+
+        private AsyncQueue asyncQueue;
+        private Method onEntityMethod;
+
+        private EntityListenerActor(final AsyncQueue asyncQueue) {
+            this.asyncQueue = asyncQueue;
+
+            try {
+                this.onEntityMethod = AsyncQueue.class.getDeclaredMethod("onEntity", Object.class);
+            } catch (NoSuchMethodException e) {
+                throw new RuntimeException("Unable to get onEntity method using reflection.", e);
+            }
+        }
+
+        @Override
+        public void onReceive(Object o) throws Exception {
+            onEntityMethod.invoke(asyncQueue, o);
+        }
+    }
+
 }
